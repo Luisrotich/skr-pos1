@@ -1,0 +1,12 @@
+{
+  "name": "ROTICH POS",
+  "short_name": "ROTICH POS",
+  "description": "ROTICH sales and inventory system",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f1f3ec",
+  "theme_color": "#172620",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

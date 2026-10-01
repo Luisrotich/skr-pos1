@@ -12,38 +12,45 @@ app.use('*', async (context, next) => {
   context.header('X-Content-Type-Options', 'nosniff');
   context.header('X-Frame-Options', 'DENY');
   context.header('Referrer-Policy', 'strict-origin-when-cross-origin');
-  context.header('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  context.header(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+  );
   await next();
 });
 
+// This route is intentionally before database middleware
 app.get('/api/health', (context) =>
-  context.json({ status: 'ok', service: 'rotich-pos-api' }),
+  context.json({
+    status: 'ok',
+    service: 'rotich-pos-api',
+  }),
 );
 
 app.use('/api/*', requireSameOrigin);
-app.use('/api/*', databaseMiddleware);
+app.use('/api/*', async (context, next) => {
+  if (new URL(context.req.url).pathname === '/api/health') {
+    await next();
+    return;
+  }
+
+  await databaseMiddleware(context, next);
+});
+app.get('/health', (context) =>
+  context.json({
+    status: 'ok',
+    service: 'rotich-pos-api',
+  }),
+);
 app.route('/api', authRoutes);
 app.route('/api', catalogRoutes);
 app.route('/api', salesRoutes);
 app.route('/api', managementRoutes);
 
-app.all('/api/*', (context) => context.json({ error: 'API route not found.' }, 404));
-app.all('*', async (context) => {
-  const response = await context.env.ASSETS.fetch(context.req.raw);
-  const headers = new Headers(response.headers);
-  const pathname = new URL(context.req.url).pathname;
+app.all('/api/*', (context) =>
+  context.json({ error: 'API route not found.' }, 404)
+);
 
-  if (pathname === '/' || pathname === '/index.html') {
-    headers.set('Cache-Control', 'no-cache');
-  } else {
-    headers.set('Cache-Control', 'public, max-age=86400, immutable');
-  }
-
-  return new Response(response.body, {
-    status: response.status,
-    statusText: response.statusText,
-    headers,
-  });
-});
+app.all('*', (context) => context.env.ASSETS.fetch(context.req.raw));
 
 export default app;

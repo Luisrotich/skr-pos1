@@ -6,7 +6,7 @@ compatibility_flags = ["nodejs_compat"]
 [[hyperdrive]]
 binding = "HYPERDRIVE"
 id = "81caff305d0f46bc85fff2b4bbf5be61"
-localConnectionString = "postgresql://neondb_owner:npg_9TOJPIteB4GM@ep-restless-meadow-b5oey1j2-pooler.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+localConnectionString = "postgresql://neondb_owner:npg_9TOJPIteB4GM@ep-restless-meadow-b5oey1j2.c-7.us-east-2.aws.neon.tech/neondb?sslmode=require"
 
 [assets]
 directory = "./public"

@@ -11,18 +11,9 @@ routes.get('/products', async (context) => {
   const categoryId = context.req.query('categoryId');
   const limit = Math.min(Math.max(Number(context.req.query('limit')) || 40, 1), 100);
   const offset = Math.max(Number(context.req.query('offset')) || 0, 0);
-  const result = query
-    ? await context.get('db').query(
-      `SELECT p.id, p.name, p.sku, p.barcode, p.category_id, c.name AS category_name,
-              p.selling_price, p.stock_quantity
-       FROM products p LEFT JOIN categories c ON c.id = p.category_id
-       WHERE p.status = 'ACTIVE'
-         AND (p.name ILIKE $1 OR p.sku ILIKE $1 OR p.barcode = $2)
-         AND ($3::uuid IS NULL OR p.category_id = $3)
-       ORDER BY p.name LIMIT $4 OFFSET $5`,
-      [`%${query}%`, query, categoryId || null, limit, offset],
-    )
-    : await context.get('db').query(
+
+  if (!query) {
+    const result = await context.get('db').query(
       `SELECT p.id, p.name, p.sku, p.barcode, p.category_id, c.name AS category_name,
               p.selling_price, p.stock_quantity
        FROM products p LEFT JOIN categories c ON c.id = p.category_id
@@ -30,46 +21,35 @@ routes.get('/products', async (context) => {
        ORDER BY p.name LIMIT $2 OFFSET $3`,
       [categoryId || null, limit, offset],
     );
+    return context.json({ products: result.rows, limit, offset });
+  }
+
+  const searchPattern = query.length >= 2 ? `%${query}%` : `${query}%`;
+  const result = await context.get('db').query(
+    `SELECT p.id, p.name, p.sku, p.barcode, p.category_id, c.name AS category_name,
+            p.selling_price, p.stock_quantity
+     FROM products p LEFT JOIN categories c ON c.id = p.category_id
+     WHERE p.status = 'ACTIVE'
+       AND ($3::uuid IS NULL OR p.category_id = $3)
+       AND (
+         p.barcode = $1 OR
+         p.sku = $1 OR
+         p.name ILIKE $2 OR
+         p.sku ILIKE $2
+       )
+     ORDER BY CASE
+       WHEN p.barcode = $1 THEN 0
+       WHEN p.sku = $1 THEN 1
+       ELSE 2
+     END,
+     p.name
+     LIMIT $4 OFFSET $5`,
+    [query, searchPattern, categoryId || null, limit, offset],
+  );
+
   return context.json({ products: result.rows, limit, offset });
 });
 
-routes.post('/products', requireRole('ADMIN'), async (context) => {
-  const body = await context.req.json().catch(() => null) as Record<string, unknown> | null;
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return context.json({ error: 'Invalid product details.' }, 400);
-  const name = typeof body?.name === 'string' ? body.name.trim() : '';
-  const sku = typeof body?.sku === 'string' ? body.sku.trim() : '';
-  const sellingPrice = Number(body?.sellingPrice);
-  const costPrice = Number(body?.costPrice ?? 0);
-  const stockQuantity = Number(body?.stockQuantity ?? 0);
-  const threshold = Number(body?.lowStockThreshold ?? 5);
-  if (!name || name.length > 160 || !sku || sku.length > 80 || !Number.isFinite(sellingPrice) || sellingPrice < 0 || !Number.isFinite(costPrice) || costPrice < 0 || !Number.isInteger(stockQuantity) || stockQuantity < 0 || !Number.isInteger(threshold) || threshold < 0) {
-    return context.json({ error: 'Invalid product details.' }, 400);
-  }
-const created = await db.query(
-  `INSERT INTO products (name, sku, barcode, category_id, selling_price, cost_price, stock_quantity, low_stock_threshold)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-  [
-    name,
-    sku,
-    typeof body.barcode === 'string' && body.barcode.trim()
-      ? body.barcode.trim()
-      : null,
-    typeof body.categoryId === 'string' && body.categoryId.trim()
-      ? body.categoryId.trim()
-      : null,
-    sellingPrice,
-    costPrice,
-    stockQuantity,
-    threshold
-  ],
-);
-  const product = created.rows[0];
-  await db.query(
-    "INSERT INTO audit_logs (user_id, action, entity, entity_id) VALUES ($1, 'PRODUCT_CREATED', 'product', $2)",
-    [context.get('user').id, product.id],
-  );
-  return context.json({ product }, 201);
-});
 routes.post('/products', requireRole('ADMIN'), async (context) => {
   const body = await context.req.json().catch(() => null) as Record<string, unknown> | null;
 

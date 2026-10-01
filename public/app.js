@@ -1,6 +1,18 @@
 const root = document.querySelector('#app');
 const toastNode = document.querySelector('#toast');
-const state = { user: null, page: 'dashboard', products: [], cart: new Map(), register: null, online: navigator.onLine, searchTimer: 0, searchVersion: 0, searchController: null, checkoutId: null };
+const state = {
+  user: null,
+  page: 'dashboard',
+  products: [],
+  cart: new Map(),
+  register: null,
+  online: navigator.onLine,
+  searchTimer: 0,
+  searchVersion: 0,
+  searchController: null,
+  checkoutId: null,
+  searchCache: new Map(),
+};
 const money = (value) => new Intl.NumberFormat('en-KE', { style: 'currency', currency: 'KES' }).format(Number(value || 0));
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character]);
 
@@ -37,6 +49,25 @@ async function api(path, options = {}) {
 }
 
 function searchProducts(value, onResults) {
+  const normalized = value.trim();
+  const cacheKey = normalized.toLowerCase();
+  const cached = state.searchCache.get(cacheKey);
+
+  if (!normalized) {
+    onResults(state.products.slice(0, 40));
+    return;
+  }
+
+  if (cached && Date.now() - cached.cachedAt < 5000) {
+    onResults(cached.products);
+    return;
+  }
+
+  if (normalized.length < 2 && !/^\d+$/.test(normalized)) {
+    onResults([]);
+    return;
+  }
+
   clearTimeout(state.searchTimer);
   state.searchController?.abort();
   const requestVersion = ++state.searchVersion;
@@ -44,12 +75,16 @@ function searchProducts(value, onResults) {
     const controller = new AbortController();
     state.searchController = controller;
     try {
-      const result = await api(`/products?q=${encodeURIComponent(value)}&limit=100`, { signal: controller.signal });
-      if (requestVersion === state.searchVersion) onResults(result.products);
+      const result = await api(`/products?q=${encodeURIComponent(normalized)}&limit=40`, { signal: controller.signal });
+      if (requestVersion === state.searchVersion) {
+        const products = result.products.slice(0, 40);
+        state.searchCache.set(cacheKey, { cachedAt: Date.now(), products });
+        onResults(products);
+      }
     } catch (error) {
       if (error.name !== 'AbortError') toast(error.message, true);
     }
-  }, 180);
+  }, 120);
 }
 
 function setOffline() {
@@ -338,7 +373,7 @@ async function renderAudit() {
 }
 
 async function renderPos() {
-  const [productData, registerData] = await Promise.all([api('/products?limit=100'), api('/register/current')]);
+  const [productData, registerData] = await Promise.all([api('/products?limit=40'), api('/register/current')]);
   state.products = productData.products; state.register = registerData.register;
   if (!state.register) {
     shell(`<div class="page-heading"><div><p class="eyebrow">START OF SHIFT</p><h1>Open register</h1><p class="page-subtitle">Enter the cash float counted into the drawer.</p></div></div><form id="open-register" class="register-form"><label>Opening cash balance<input name="openingBalance" type="number" min="0" step="0.01" required autofocus></label><button class="button button-primary" type="submit">Open register →</button></form>`);
@@ -351,8 +386,26 @@ async function renderPos() {
   }
   shell(`<div class="pos-heading"><div><p class="eyebrow">CASH REGISTER</p><h1>New sale</h1></div><div class="register-open"><span></span> Register open <small>Float ${money(state.register.opening_balance)}</small><button class="text-button" id="close-register">Close shift</button></div></div>
     <div class="pos-layout"><section class="catalog-pane"><label class="search-box pos-search"><span>⌕</span><input id="pos-search" placeholder="Search product, SKU or scan barcode" autocomplete="off"></label><div class="product-grid" id="pos-products">${productCards(state.products)}</div></section>
-    <aside class="cart-pane"><div class="cart-title"><div><p class="eyebrow">CURRENT ORDER</p><h2>Cart <span id="cart-count">0</span></h2></div><button class="text-button" id="clear-cart">Clear</button></div><div class="cart-items" id="cart-items"></div><div class="cart-summary"><div><span>Subtotal</span><strong id="cart-subtotal">${money(0)}</strong></div><div class="cart-total"><span>Total due</span><strong id="cart-total">${money(0)}</strong></div><label class="paid-field">Amount received<input id="amount-paid" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></label><div class="change-row"><span>Change</span><strong id="cart-change">${money(0)}</strong></div><button class="button button-primary button-wide" id="complete-sale" disabled>Complete cash sale <span>→</span></button><p class="cash-only-note">CASH PAYMENT</p></div></aside></div>`);
+    <aside class="cart-pane" id="cart-pane"><div class="cart-title"><div><p class="eyebrow">CURRENT ORDER</p><h2>Cart <span id="cart-count">0</span></h2></div><button class="text-button" id="clear-cart">Clear</button></div><div class="cart-items" id="cart-items"></div><div class="cart-summary"><div><span>Subtotal</span><strong id="cart-subtotal">${money(0)}</strong></div><div class="cart-total"><span>Total due</span><strong id="cart-total">${money(0)}</strong></div><label class="paid-field">Amount received<input id="amount-paid" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></label><div class="change-row"><span>Change</span><strong id="cart-change">${money(0)}</strong></div><button class="button button-primary button-wide" id="complete-sale" disabled>Complete cash sale <span>→</span></button><p class="cash-only-note">CASH PAYMENT</p></div></aside>
+    <button class="mobile-cart-toggle" id="mobile-cart-toggle" type="button" aria-expanded="false" aria-controls="cart-pane"><span>Cart</span><strong id="mobile-cart-count">0</strong></button>
+    <div class="mobile-cart-backdrop" id="mobile-cart-backdrop"></div></div>`);
   renderCart();
+  const mobileCartToggle = document.querySelector('#mobile-cart-toggle');
+  const mobileCartBackdrop = document.querySelector('#mobile-cart-backdrop');
+  const mobileCartPane = document.querySelector('#cart-pane');
+  const setMobileCartState = (open) => {
+    if (!mobileCartToggle || !mobileCartPane || !mobileCartBackdrop) return;
+    mobileCartPane.classList.toggle('is-open', open);
+    mobileCartBackdrop.classList.toggle('is-open', open);
+    mobileCartToggle.classList.toggle('is-open', open);
+    mobileCartToggle.setAttribute('aria-expanded', String(open));
+  };
+  mobileCartToggle?.addEventListener('click', () => {
+    const isOpen = !mobileCartPane.classList.contains('is-open');
+    setMobileCartState(isOpen);
+  });
+  mobileCartBackdrop?.addEventListener('click', () => setMobileCartState(false));
+
   document.querySelector('#pos-search').addEventListener('input', (event) => {
     searchProducts(event.target.value, (products) => {
       state.products = products;
@@ -383,11 +436,19 @@ function renderCart() {
   const items = [...state.cart.values()];
   const subtotal = items.reduce((sum, item) => sum + Math.round(Number(item.selling_price) * 100) * item.quantity, 0) / 100;
   const paid = Number(document.querySelector('#amount-paid')?.value || 0);
+  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
   container.innerHTML = items.length ? items.map((item) => `<div class="cart-row"><div class="cart-row-title"><strong>${escapeHtml(item.name)}</strong><small>${money(item.selling_price)} each</small></div><div class="quantity-control"><button data-quantity="${item.id}" data-step="-1" aria-label="Remove one">−</button><span>${item.quantity}</span><button data-quantity="${item.id}" data-step="1" aria-label="Add one">+</button></div><strong>${money(Number(item.selling_price) * item.quantity)}</strong><button class="remove-item" data-remove="${item.id}" aria-label="Remove ${escapeHtml(item.name)}">×</button></div>`).join('') : '<div class="cart-empty"><span>＋</span><strong>Your cart is empty</strong><small>Add an item to start a sale.</small></div>';
-  document.querySelector('#cart-count').textContent = String(items.reduce((sum, item) => sum + item.quantity, 0));
+  const cartCount = document.querySelector('#cart-count'); const mobileCartCount = document.querySelector('#mobile-cart-count');
+  if (cartCount) cartCount.textContent = String(itemCount);
+  if (mobileCartCount) mobileCartCount.textContent = String(itemCount);
   document.querySelector('#cart-subtotal').textContent = money(subtotal); document.querySelector('#cart-total').textContent = money(subtotal);
   document.querySelector('#cart-change').textContent = money(Math.max(0, paid - subtotal));
   document.querySelector('#complete-sale').disabled = !items.length || paid < subtotal || !state.online;
+  const mobileCartToggle = document.querySelector('#mobile-cart-toggle');
+  if (mobileCartToggle) {
+    mobileCartToggle.title = itemCount ? `${itemCount} item${itemCount === 1 ? '' : 's'} in cart` : 'Cart is empty';
+    mobileCartToggle.disabled = !items.length;
+  }
   container.querySelectorAll('[data-quantity]').forEach((button) => button.addEventListener('click', () => {
     const item = state.cart.get(button.dataset.quantity); const next = item.quantity + Number(button.dataset.step);
     if (next < 1) { state.cart.delete(item.id); state.checkoutId = null; }

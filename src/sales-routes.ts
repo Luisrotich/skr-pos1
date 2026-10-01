@@ -88,6 +88,7 @@ routes.post('/sales', requireRole('CASHIER'), async (context) => {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(idempotencyKey) || !Array.isArray(items) || items.length === 0 || items.length > 100 || !Number.isFinite(amountPaid) || amountPaid < 0 || amountPaid > 1_000_000_000) {
     return context.json({ error: 'Invalid sale.' }, 400);
   }
+
   const quantities = new Map<string, number>();
   for (const item of items) {
     if (typeof item.productId !== 'string' || !/^[0-9a-f-]{36}$/i.test(item.productId) || !Number.isInteger(item.quantity) || Number(item.quantity) < 1 || Number(item.quantity) > 10_000) {
@@ -95,23 +96,28 @@ routes.post('/sales', requireRole('CASHIER'), async (context) => {
     }
     quantities.set(item.productId, (quantities.get(item.productId) ?? 0) + Number(item.quantity));
   }
+
   const payloadHash = await hashSessionToken(JSON.stringify({
     amountPaidCents: toCents(amountPaid),
     items: [...quantities.entries()].sort(([left], [right]) => left.localeCompare(right)),
   }));
+
   const db = context.get('db');
   await db.query('BEGIN');
   try {
     await db.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [idempotencyKey]);
+
     const existing = await db.query(
       'SELECT id, idempotency_hash, receipt_number, subtotal, total, amount_paid, change_due, created_at FROM sales WHERE idempotency_key = $1 AND cashier_id = $2',
       [idempotencyKey, context.get('user').id],
     );
+
     if (existing.rowCount) {
       if (existing.rows[0].idempotency_hash !== payloadHash) {
         await db.query('ROLLBACK');
         return context.json({ error: 'This checkout key has already been used for a different sale.' }, 409);
       }
+
       const existingItems = await db.query(
         'SELECT product_name AS name, quantity, unit_price AS "unitPrice", subtotal FROM sale_items WHERE sale_id = $1 ORDER BY id',
         [existing.rows[0].id],
@@ -119,6 +125,7 @@ routes.post('/sales', requireRole('CASHIER'), async (context) => {
       await db.query('COMMIT');
       return context.json({ sale: { ...existing.rows[0], amountPaid: Number(existing.rows[0].amount_paid), change: Number(existing.rows[0].change_due), items: existingItems.rows } }, 201);
     }
+
     const registerResult = await db.query(
       "SELECT id FROM register_sessions WHERE cashier_id = $1 AND status = 'OPEN' FOR UPDATE",
       [context.get('user').id],
@@ -127,65 +134,129 @@ routes.post('/sales', requireRole('CASHIER'), async (context) => {
       await db.query('ROLLBACK');
       return context.json({ error: 'Open a register before completing a sale.' }, 409);
     }
+
     const registerId = registerResult.rows[0].id as string;
     const productIds = [...quantities.keys()].sort();
     const lockedProducts = await db.query(
-      `SELECT id, name, selling_price, cost_price, stock_quantity FROM products
-       WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE' ORDER BY id FOR UPDATE`,
+      `SELECT id, name, selling_price, cost_price, stock_quantity
+       FROM products
+       WHERE id = ANY($1::uuid[]) AND status = 'ACTIVE'
+       ORDER BY id
+       FOR UPDATE`,
       [productIds],
     );
+
     if (lockedProducts.rowCount !== productIds.length) {
       await db.query('ROLLBACK');
       return context.json({ error: 'One or more products are unavailable.' }, 409);
     }
+
+    const productMap = new Map(lockedProducts.rows.map((product) => [product.id as string, product]));
+    const saleLines: Array<{ productId: string; productName: string; quantity: number; unitPriceCents: number; unitCostCents: number; lineCents: number }> = [];
     let subtotalCents = 0;
-    const saleItems = lockedProducts.rows.map((product) => {
-      const quantity = quantities.get(product.id as string) ?? 0;
-      if (Number(product.stock_quantity) < quantity) throw new Error(`INSUFFICIENT_STOCK:${product.name}`);
+
+    for (const [productId, quantity] of [...quantities.entries()].sort(([left], [right]) => left.localeCompare(right))) {
+      const product = productMap.get(productId);
+      if (!product) {
+        await db.query('ROLLBACK');
+        return context.json({ error: 'One or more products are unavailable.' }, 409);
+      }
+
+      const stockQuantity = Number(product.stock_quantity);
+      if (stockQuantity < quantity) {
+        await db.query('ROLLBACK');
+        return context.json({ error: `Insufficient stock for ${String(product.name)}.` }, 409);
+      }
+
       const unitPriceCents = toCents(product.selling_price as string);
+      const unitCostCents = toCents(product.cost_price as string);
       const lineCents = unitPriceCents * quantity;
       subtotalCents += lineCents;
-      return { ...product, quantity, unitPriceCents, lineCents };
-    });
+
+      saleLines.push({
+        productId,
+        productName: String(product.name),
+        quantity,
+        unitPriceCents,
+        unitCostCents,
+        lineCents,
+      });
+    }
+
     const paidCents = toCents(amountPaid);
     if (!Number.isSafeInteger(subtotalCents) || !Number.isSafeInteger(paidCents) || paidCents < subtotalCents) {
       await db.query('ROLLBACK');
       return context.json({ error: 'Amount received is less than the sale total.' }, 400);
     }
+
     const receiptNumber = `R-${new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14)}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`;
     const saleResult = await db.query(
       `INSERT INTO sales (idempotency_key, idempotency_hash, receipt_number, cashier_id, register_session_id, subtotal, total, amount_paid, change_due)
-       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8) RETURNING id, receipt_number, created_at`,
+       VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8)
+       RETURNING id, receipt_number, created_at`,
       [idempotencyKey, payloadHash, receiptNumber, context.get('user').id, registerId, subtotalCents / 100, paidCents / 100, (paidCents - subtotalCents) / 100],
     );
+
     const sale = saleResult.rows[0];
-    for (const item of saleItems) {
+    const itemInsertValues: Array<[string, string, number, number, number, number]> = saleLines.map((line) => [sale.id, line.productId, line.quantity, line.unitPriceCents / 100, line.unitCostCents / 100, line.lineCents / 100]);
+
+    for (const value of itemInsertValues) {
       await db.query(
         'INSERT INTO sale_items (sale_id, product_id, product_name, quantity, unit_price, unit_cost, subtotal) VALUES ($1, $2, $3, $4, $5, $6, $7)',
-        [sale.id, item.id, item.name, item.quantity, item.unitPriceCents / 100, toCents(item.cost_price as string) / 100, item.lineCents / 100],
-      );
-      const updated = await db.query(
-        'UPDATE products SET stock_quantity = stock_quantity - $1, updated_at = now() WHERE id = $2 AND stock_quantity >= $1 RETURNING id',
-        [item.quantity, item.id],
-      );
-      if (!updated.rowCount) throw new Error('INSUFFICIENT_STOCK');
-      await db.query(
-        "INSERT INTO stock_movements (product_id, quantity, movement_type, reference_id, user_id) VALUES ($1, $2, 'SALE', $3, $4)",
-        [item.id, -item.quantity, sale.id, context.get('user').id],
+        [sale.id, value[1], productMap.get(value[1])?.name ?? '', value[2], value[3], value[4], value[5]],
       );
     }
+
+    const stockUpdatePayload = JSON.stringify(saleLines.map((line) => ({ id: line.productId, quantity: line.quantity })));
+    const stockUpdate = await db.query(
+      `UPDATE products p
+       SET stock_quantity = p.stock_quantity - v.quantity,
+           updated_at = now()
+       FROM (
+         SELECT id, quantity
+         FROM jsonb_to_recordset($1::jsonb) AS x(id uuid, quantity integer)
+       ) AS v
+       WHERE p.id = v.id AND p.status = 'ACTIVE' AND p.stock_quantity >= v.quantity
+       RETURNING p.id`,
+      [stockUpdatePayload],
+    );
+
+    if (stockUpdate.rowCount !== saleLines.length) {
+      throw new Error('INSUFFICIENT_STOCK');
+    }
+
+    const movementValues = saleLines.map((line) => `($1, $2, 'SALE', $3, $4)`).join(', ');
+    const movementParams: unknown[] = [];
+    saleLines.forEach((line) => {
+      movementParams.push(line.productId, -line.quantity, sale.id, context.get('user').id);
+    });
+    await db.query(
+      `INSERT INTO stock_movements (product_id, quantity, movement_type, reference_id, user_id)
+       VALUES ${movementValues}`,
+      movementParams,
+    );
+
     await db.query(
       "INSERT INTO audit_logs (user_id, action, entity, entity_id, details) VALUES ($1, 'SALE_COMPLETED', 'sale', $2, $3)",
       [context.get('user').id, sale.id, JSON.stringify({ receiptNumber, total: subtotalCents / 100 })],
     );
+
     await db.query('COMMIT');
     return context.json({
-      sale: { ...sale, subtotal: subtotalCents / 100, total: subtotalCents / 100, amountPaid: paidCents / 100, change: (paidCents - subtotalCents) / 100, paymentMethod: 'CASH', items: saleItems.map((item) => ({ name: item.name, quantity: item.quantity, unitPrice: item.unitPriceCents / 100, subtotal: item.lineCents / 100 })) },
+      sale: {
+        ...sale,
+        subtotal: subtotalCents / 100,
+        total: subtotalCents / 100,
+        amountPaid: paidCents / 100,
+        change: (paidCents - subtotalCents) / 100,
+        paymentMethod: 'CASH',
+        items: saleLines.map((line) => ({ name: line.productName, quantity: line.quantity, unitPrice: line.unitPriceCents / 100, subtotal: line.lineCents / 100 })),
+      },
     }, 201);
   } catch (error) {
     await db.query('ROLLBACK').catch(() => undefined);
     if (error instanceof Error && error.message.startsWith('INSUFFICIENT_STOCK')) {
-      return context.json({ error: error.message.split(':')[1] ? `Insufficient stock for ${error.message.split(':')[1]}.` : 'Insufficient stock.' }, 409);
+      return context.json({ error: 'Insufficient stock for one or more products.' }, 409);
     }
     throw error;
   }

@@ -28,6 +28,22 @@ app.route('/api', salesRoutes);
 app.route('/api', managementRoutes);
 
 app.all('/api/*', (context) => context.json({ error: 'API route not found.' }, 404));
-app.all('*', (context) => context.env.ASSETS.fetch(context.req.raw));
+app.all('*', async (context) => {
+  const response = await context.env.ASSETS.fetch(context.req.raw);
+  const headers = new Headers(response.headers);
+  const pathname = new URL(context.req.url).pathname;
+
+  if (pathname === '/' || pathname === '/index.html') {
+    headers.set('Cache-Control', 'no-cache');
+  } else {
+    headers.set('Cache-Control', 'public, max-age=86400, immutable');
+  }
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+});
 
 export default app;

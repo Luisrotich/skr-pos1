@@ -1,12 +1,16 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0a84ff">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon.svg">
-<title>POS — Admin</title>
+<meta name="theme-color" content="#8b5cf6">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Admin">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="/manifest-admin.webmanifest">
+<link rel="apple-touch-icon" href="/icon-admin.svg">
+<title>POS Admin</title>
+
 <style>
 /* ================= BASE ================= */
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -2061,6 +2065,13 @@ window.addEventListener('focus', ()=>{ if (TOKEN) reloadData(false); });
     go('dashboard');
   }
 })();
+</script>
+<script>
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>

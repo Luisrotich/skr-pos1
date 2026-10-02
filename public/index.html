@@ -6,12 +6,11 @@
 <meta name="theme-color" content="#0a84ff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<meta name="apple-mobile-web-app-title" content="POS">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icon.svg">
-<title>POS</title>
-<link rel="manifest" id="manifestLink">
-<link rel="apple-touch-icon" id="appleIcon">
+<meta name="apple-mobile-web-app-title" content="POS Cashier">
+<title>POS Cashier</title>
+<link rel="manifest" href="/manifest-cashier.webmanifest">
+<link rel="apple-touch-icon" href="/icon-cashier.svg">
+<meta name="mobile-web-app-capable" content="yes">
 <style>
 /* ============ BASE ============ */
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -977,6 +976,13 @@ function renderHistory(){
   renderCart();
   await Promise.all([ refreshProducts(), refreshSales() ]);
 })();
+</script>
+<script>
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
 </script>
 </body>
 </html>

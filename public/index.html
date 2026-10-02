@@ -342,16 +342,16 @@ nav button:active{background:rgba(255,255,255,.05)}
 <header class="appheader">
   <div class="hrow">
     <div class="brand">
-      <div class="logo">POS</div>
+      <div class="logo">SKR</div>
       <div>
-        <div class="bname">MY POS</div>
+        <div class="bname">tHE KOBBILL</div>
         <div class="cashier" id="cashierLabel">Cashier</div>
       </div>
     </div>
     <div class="clock" id="clock">—</div>
   </div>
 </header>
-
+s
 <!-- ================= MAIN ================= -->
 <main>
 
@@ -573,7 +573,8 @@ function renderProducts(){
     else { btnLabel='+ ADD'; disabled=false; }
 
     return `<div class="pcard">
-      <button class="editbtn" onclick="openProductForm('${p.id}')" aria-label="Edit">✎</button>
+   
+  
       <div class="pname">${escapeHtml(p.name)}</div>
       <div class="pcat">${escapeHtml(p.category||'Uncategorised')}</div>
       <div class="price">${money(p.price)}</div>

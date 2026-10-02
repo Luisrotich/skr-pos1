@@ -1,4 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#1e4938" />
-  <path d="M144 368V144h64l96 126V144h64v224h-60l-100-131v131z" fill="#f4f4eb" />
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="104" fill="#000"/>
+  <rect x="52" y="52" width="408" height="408" rx="72" fill="#0a84ff"/>
+  <text x="256" y="322" font-family="Arial,Helvetica,sans-serif" font-size="176"
+        font-weight="bold" fill="#fff" text-anchor="middle">POS</text>
 </svg>

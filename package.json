@@ -1,21 +1,17 @@
 {
-  "name": "rotich-pos",
-  "version": "0.1.0",
+  "name": "pos-app",
+  "version": "1.0.0",
   "private": true,
-  "type": "module",
+  "main": "server.js",
   "scripts": {
-    "dev": "wrangler dev",
-    "typecheck": "tsc --noEmit",
-    "deploy": "wrangler deploy"
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "dependencies": {
-    "hono": "^4.7.4",
-    "pg": "^8.16.3"
-  },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260926.1",
-    "@types/pg": "^8.11.11",
-    "typescript": "^5.8.2",
-    "wrangler": "^4.7.1"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "pg": "^8.12.0"
   }
 }

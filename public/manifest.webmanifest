@@ -1,12 +1,14 @@
 {
-  "name": "ROTICH POS",
-  "short_name": "ROTICH POS",
-  "description": "ROTICH sales and inventory system",
-  "start_url": "/",
+  "name": "POS",
+  "short_name": "POS",
+  "description": "Point of Sale for cashiers",
+  "start_url": "./index.html",
+  "scope": "./",
   "display": "standalone",
-  "background_color": "#f1f3ec",
-  "theme_color": "#172620",
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#0a84ff",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }
